@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RecallPro - Gestor Completo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        .toast-enter-active, .toast-leave-active { transition: all 0.25s ease; }
+        .toast-enter-from { opacity: 0; transform: translateX(40px); }
+        .toast-leave-to { opacity: 0; transform: translateX(40px); }
+        .toast-move { transition: transform 0.25s ease; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+    <div id="app" class="container mx-auto px-4 py-8 max-w-6xl">
+
+        <!-- CABECERA -->
+        <header class="flex flex-col md:flex-row justify-between items-center border-b border-slate-700 pb-6 mb-8 gap-4">
+            <h1 class="text-3xl font-extrabold text-blue-400">🧠 RecallPro <span class="text-xs font-normal text-slate-500 align-middle">· sincronizado con Notion</span></h1>
+            <nav class="flex gap-2 flex-wrap justify-center">
+                <button @click="vista = 'dashboard'" :class="['px-4 py-2 rounded-xl font-bold', vista==='dashboard' ? 'bg-blue-600' : 'bg-slate-800 hover:bg-slate-700']">🏠 Inicio</button>
+                <button @click="vista = 'estadisticas'" :class="['px-4 py-2 rounded-xl font-bold', vista==='estadisticas' ? 'bg-blue-600' : 'bg-slate-800 hover:bg-slate-700']">📊 Historial y Agenda</button>
+                <button @click="exportarRespaldo" class="px-4 py-2 rounded-xl font-bold bg-slate-800 hover:bg-slate-700">⬇️ Exportar</button>
+                <label class="px-4 py-2 rounded-xl font-bold bg-slate-800 hover:bg-slate-700 cursor-pointer">
+                    ⬆️ Importar a Notion
+                    <input type="file" @change="importarRespaldo" accept=".json" class="hidden">
+                </label>
+                <button @click="cargarDatos" class="px-3 py-2 rounded-xl font-bold bg-slate-800 hover:bg-slate-700" title="Recargar desde Notion">🔄</button>
+            </nav>
+        </header>
+
+        <!-- ESTADO DE CARGA / ERROR -->
+        <div v-if="cargando" class="text-center py-20 text-slate-400">
+            <div class="text-4xl mb-3 animate-pulse">🔄</div>
+            Cargando tus datos desde Notion…
+        </div>
+        <div v-else-if="errorConexion" class="bg-rose-900/40 border border-rose-700 rounded-2xl p-6 mb-8 text-center">
+            <p class="font-bold text-rose-300 mb-1">⛔ No se pudo conectar con Notion</p>
+            <p class="text-sm text-slate-300 mb-3">{{ errorConexion }}</p>
+            <button @click="cargarDatos" class="bg-rose-600 hover:bg-rose-500 px-4 py-2 rounded-xl font-bold">Reintentar</button>
+        </div>
+
+        <template v-else>
+        <!-- DASHBOARD (Carpetas) -->
+        <main v-if="vista === 'dashboard'">
+            <div class="bg-slate-800 border border-blue-900 rounded-2xl p-6 mb-8">
+                <h3 class="font-bold text-blue-400 mb-2">💡 Prompt para IA:</h3>
+                <code class="block bg-slate-950 p-4 rounded-lg text-sm text-slate-300">"Actúa como profesor experto. Crea un JSON para mi app con: 'curso', 'tema', 'flashcards' (min 5: pregunta/respuesta) y 'cuestionario' (min 3: pregunta, opciones A/B/C/D, respuesta_correcta, justificacion). Devuelve SOLO el JSON."</code>
+            </div>
+
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-3">
+                <h2 class="text-2xl font-bold">Mis Carpetas</h2>
+                <button @click="abrirModalCarpeta" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-xl font-bold">➕ Crear Carpeta</button>
+            </div>
+
+            <div class="flex gap-2 mb-6 flex-wrap">
+                <button @click="filtroCategoria = 'todas'" :class="['px-3 py-1.5 rounded-lg text-sm font-bold border', filtroCategoria==='todas' ? 'bg-blue-600 border-blue-600' : 'bg-slate-800 border-slate-700 hover:border-slate-500']">Todas ({{ cursos.length }})</button>
+                <button @click="filtroCategoria = 'universidad'" :class="['px-3 py-1.5 rounded-lg text-sm font-bold border', filtroCategoria==='universidad' ? 'bg-blue-600 border-blue-600' : 'bg-slate-800 border-slate-700 hover:border-slate-500']">🎓 Universidad ({{ contarCategoria('universidad') }})</button>
+                <button @click="filtroCategoria = 'personal'" :class="['px-3 py-1.5 rounded-lg text-sm font-bold border', filtroCategoria==='personal' ? 'bg-blue-600 border-blue-600' : 'bg-slate-800 border-slate-700 hover:border-slate-500']">💡 Proyectos personales ({{ contarCategoria('personal') }})</button>
+            </div>
+
+            <div v-if="cursos.length === 0" class="text-slate-400 text-center py-16 border border-dashed border-slate-700 rounded-3xl">
+                Aún no tienes carpetas. Crea una para empezar 🚀
+            </div>
+            <div v-else-if="cursosFiltrados.length === 0" class="text-slate-400 text-center py-16 border border-dashed border-slate-700 rounded-3xl">
+                No tienes carpetas en esta categoría todavía.
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div v-for="{ curso, idx } in cursosFiltrados" :key="curso.id"
+                     class="bg-slate-800/50 p-5 rounded-3xl border border-slate-700 hover:border-blue-600 transition cursor-pointer relative group"
+                     @click="abrirCarpeta(idx)">
+                    <button @click.stop="eliminarCarpeta(idx)" class="absolute top-4 right-4 text-rose-500 hover:text-rose-400 text-sm">🗑️</button>
+                    <div class="flex items-center justify-between pr-6">
+                        <div class="text-4xl mb-2">📂</div>
+                        <button @click.stop="alternarCategoria(idx)"
+                                class="text-xs font-bold px-2 py-1 rounded-full border"
+                                :class="curso.categoria === 'personal' ? 'bg-amber-900/40 border-amber-700 text-amber-300' : 'bg-blue-900/40 border-blue-700 text-blue-300'"
+                                title="Toca para cambiar de categoría">
+                            {{ curso.categoria === 'personal' ? '💡 Personal' : '🎓 Universidad' }}
+                        </button>
+                    </div>
+                    <h3 class="font-bold text-lg text-blue-300 pr-6">{{ curso.nombre }}</h3>
+                    <p class="text-slate-400 text-sm mt-1">{{ curso.temas.length }} tema{{ curso.temas.length === 1 ? '' : 's' }}</p>
+
+                    <p v-if="proximoDeCurso(curso)" class="text-xs mt-3 font-bold" :class="badgeClass(diasRestantes(proximoDeCurso(curso).proximoRepaso))">
+                        Próximo: {{ proximoDeCurso(curso).nombre }} · {{ etiquetaFecha(proximoDeCurso(curso).proximoRepaso) }}
+                    </p>
+                    <p v-else class="text-xs mt-3 text-slate-500">Sin temas todavía</p>
+
+                    <label @click.stop class="mt-4 block bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-lg text-sm cursor-pointer text-center">
+                        ➕ Subir JSON
+                        <input type="file" @change="e => subirJSON(e, curso)" accept=".json" class="hidden">
+                    </label>
+                </div>
+            </div>
+        </main>
+
+        <!-- ESTADÍSTICAS -->
+        <main v-if="vista === 'estadisticas'" class="grid md:grid-cols-2 gap-8">
+            <div class="bg-slate-800 p-6 rounded-3xl">
+                <h2 class="text-xl font-bold text-emerald-400 mb-4">📅 Agenda de Repasos</h2>
+                <div v-if="agendaOrdenada.length === 0" class="text-slate-500 text-sm">No hay repasos programados.</div>
+                <div v-for="[fecha, items] in agendaOrdenada" :key="fecha" class="mb-4">
+                    <div class="font-bold text-sm" :class="badgeClass(diasRestantes(fecha))">{{ etiquetaFecha(fecha) }} · {{ fecha }}</div>
+                    <div v-for="item in items" :key="item.id" class="bg-slate-900 p-2 rounded my-1 text-sm flex justify-between items-center">
+                        <span>{{ item.nombre }} <span class="text-slate-500">({{ item.curso }})</span></span>
+                        <button @click="empezarRepaso(item, item.curso)" class="text-blue-400 hover:text-blue-300 text-xs font-bold">Repasar →</button>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-slate-800 p-6 rounded-3xl">
+                <h2 class="text-xl font-bold text-blue-400 mb-4">📈 Historial</h2>
+                <div v-if="historial.length === 0" class="text-slate-500 text-sm">Aún no completaste ningún repaso.</div>
+                <div v-for="reg in historial" :key="reg.id" class="text-sm bg-slate-900 p-3 my-1 rounded-lg flex justify-between items-center">
+                    <span>{{ reg.fecha }} · {{ reg.tema }} <span class="text-slate-500">({{ reg.curso }})</span></span>
+                    <span v-if="reg.total" class="font-bold" :class="reg.score/reg.total >= 0.7 ? 'text-emerald-400' : 'text-amber-400'">{{ reg.score }}/{{ reg.total }}</span>
+                </div>
+            </div>
+        </main>
+
+        <!-- MODAL: Contenido de una carpeta, ordenado por próximo repaso -->
+        <div v-if="carpetaAbierta !== null" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-40" @click.self="cerrarCarpeta">
+            <div class="bg-slate-800 rounded-3xl p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto border border-slate-700">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-bold text-blue-300">📂 {{ cursos[carpetaAbierta].nombre }}</h3>
+                    <button @click="cerrarCarpeta" class="text-slate-400 hover:text-white text-xl leading-none">✕</button>
+                </div>
+
+                <div v-if="temasOrdenados.length === 0" class="text-slate-400 text-sm text-center py-8">
+                    No hay temas todavía. Sube un JSON para agregar uno.
+                </div>
+
+                <div v-for="tema in temasOrdenados" :key="tema.id" class="bg-slate-900 rounded-2xl p-4 mb-3 flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="font-bold truncate">{{ tema.nombre }}</div>
+                        <div class="text-xs mt-1 font-bold" :class="badgeClass(diasRestantes(tema.proximoRepaso))">{{ etiquetaFecha(tema.proximoRepaso) }}</div>
+                    </div>
+                    <div class="flex gap-2 items-center shrink-0">
+                        <button @click="empezarRepaso(tema, cursos[carpetaAbierta].nombre)" class="bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-lg text-sm font-bold">Repasar</button>
+                        <button @click="eliminarTemaPorId(carpetaAbierta, tema.id)" class="text-rose-500 hover:text-rose-400">🗑️</button>
+                    </div>
+                </div>
+
+                <label class="mt-2 block bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-lg text-sm cursor-pointer text-center">
+                    ➕ Subir otro JSON
+                    <input type="file" @change="e => subirJSON(e, cursos[carpetaAbierta])" accept=".json" class="hidden">
+                </label>
+            </div>
+        </div>
+
+        <!-- MODAL: Sesión de repaso activo (flashcards + cuestionario) -->
+        <div v-if="sesion" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+            <div class="bg-slate-800 rounded-3xl p-6 w-full max-w-xl border border-slate-700">
+                <div class="flex justify-between items-center mb-4">
+                    <div>
+                        <div class="text-xs text-slate-400">{{ sesion.curso }}</div>
+                        <h3 class="text-lg font-bold text-blue-300">{{ sesion.tema.nombre }}</h3>
+                    </div>
+                    <button @click="cancelarSesion" class="text-slate-400 hover:text-white text-xl leading-none">✕</button>
+                </div>
+
+                <!-- Fase Flashcards -->
+                <div v-if="sesion.fase === 'flashcards'">
+                    <div class="text-xs text-slate-400 mb-2">🗂️ Flashcards · {{ sesion.flashcardIndex + 1 }}/{{ sesion.tema.flashcards.length }}</div>
+                    <div @click="sesion.flipped = !sesion.flipped"
+                         class="bg-slate-900 rounded-2xl p-8 min-h-[180px] flex items-center justify-center text-center cursor-pointer select-none border border-slate-700 hover:border-blue-600 transition">
+                        <p class="text-lg">{{ sesion.flipped ? sesion.tema.flashcards[sesion.flashcardIndex].respuesta : sesion.tema.flashcards[sesion.flashcardIndex].pregunta }}</p>
+                    </div>
+                    <p class="text-center text-xs text-slate-500 mt-2">{{ sesion.flipped ? 'Respuesta — toca para ver la pregunta' : 'Pregunta — toca para revelar la respuesta' }}</p>
+                    <button @click="siguienteFlashcard" class="w-full mt-4 bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold">
+                        {{ sesion.flashcardIndex + 1 < sesion.tema.flashcards.length ? 'Siguiente →' : 'Ir al cuestionario →' }}
+                    </button>
+                </div>
+
+                <!-- Fase Cuestionario -->
+                <div v-else-if="sesion.fase === 'cuestionario'">
+                    <div class="text-xs text-slate-400 mb-2">📝 Cuestionario · {{ sesion.quizIndex + 1 }}/{{ sesion.tema.cuestionario.length }}</div>
+                    <p class="font-bold mb-4">{{ preguntaActual.pregunta }}</p>
+                    <div class="flex flex-col gap-2">
+                        <button v-for="(texto, letra) in preguntaActual.opciones" :key="letra"
+                                @click="responder(letra)"
+                                :disabled="sesion.respondida"
+                                class="text-left px-4 py-3 rounded-xl border transition"
+                                :class="claseOpcion(letra)">
+                            <span class="font-bold mr-2">{{ letra }}.</span>{{ texto }}
+                        </button>
+                    </div>
+                    <div v-if="sesion.respondida" class="mt-4 p-4 rounded-xl" :class="sesion.ultimaCorrecta ? 'bg-emerald-900/40 border border-emerald-700' : 'bg-rose-900/40 border border-rose-700'">
+                        <p class="font-bold mb-1">{{ sesion.ultimaCorrecta ? '✅ ¡Correcto!' : '❌ Incorrecto' }}</p>
+                        <p class="text-sm text-slate-300">{{ preguntaActual.justificacion }}</p>
+                    </div>
+                    <button v-if="sesion.respondida" @click="siguientePregunta" class="w-full mt-4 bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold">
+                        {{ sesion.quizIndex + 1 < sesion.tema.cuestionario.length ? 'Siguiente pregunta →' : 'Ver resultado →' }}
+                    </button>
+                </div>
+
+                <!-- Fase Resultado -->
+                <div v-else-if="sesion.fase === 'resultado'" class="text-center">
+                    <div class="text-5xl mb-3">{{ resultadoEmoji }}</div>
+                    <h3 class="text-2xl font-bold mb-1">{{ sesion.score }} / {{ sesion.tema.cuestionario.length }}</h3>
+                    <p class="text-slate-400 mb-4">{{ Math.round(porcentaje) }}% de aciertos</p>
+                    <p class="text-sm text-slate-300 mb-1">Próximo repaso programado:</p>
+                    <p class="font-bold text-blue-300 mb-6">{{ sesion.tema.proximoRepaso }} · {{ etiquetaFecha(sesion.tema.proximoRepaso) }}</p>
+                    <p class="text-xs text-slate-500 mb-4">Guardado en Notion ✓</p>
+                    <button @click="cerrarSesion" class="w-full bg-emerald-600 hover:bg-emerald-500 py-3 rounded-xl font-bold">Listo</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODAL: Advertencia de confirmación -->
+        <div v-if="confirmDialog" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-[70]">
+            <div class="bg-slate-800 rounded-3xl p-6 w-full max-w-sm border border-rose-700 text-center">
+                <div class="text-4xl mb-3">⚠️</div>
+                <p class="mb-6 text-slate-200">{{ confirmDialog.mensaje }}</p>
+                <div class="flex gap-3">
+                    <button @click="cancelarConfirmacion" class="flex-1 bg-slate-700 hover:bg-slate-600 py-2 rounded-xl font-bold">Cancelar</button>
+                    <button @click="confirmarAccion" class="flex-1 bg-rose-600 hover:bg-rose-500 py-2 rounded-xl font-bold">Eliminar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODAL: Nueva carpeta (nombre + categoría) -->
+        <div v-if="modalCarpetaAbierto" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-[70]" @click.self="cerrarModalCarpeta">
+            <div class="bg-slate-800 rounded-3xl p-6 w-full max-w-sm border border-slate-700">
+                <h3 class="text-lg font-bold text-blue-300 mb-4">➕ Nueva carpeta</h3>
+                <label class="text-sm text-slate-400 mb-1 block">Nombre</label>
+                <input v-model="nuevaCarpetaNombre" @keyup.enter="confirmarNuevaCarpeta" type="text" placeholder="Ej. Macroeconomía II"
+                       class="w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-2 mb-4 outline-none focus:border-blue-500">
+                <label class="text-sm text-slate-400 mb-2 block">Categoría</label>
+                <div class="flex gap-2 mb-6">
+                    <button @click="nuevaCarpetaCategoria = 'universidad'"
+                            :class="['flex-1 px-3 py-2 rounded-xl text-sm font-bold border', nuevaCarpetaCategoria==='universidad' ? 'bg-blue-600 border-blue-600' : 'bg-slate-900 border-slate-600 hover:border-slate-400']">🎓 Universidad</button>
+                    <button @click="nuevaCarpetaCategoria = 'personal'"
+                            :class="['flex-1 px-3 py-2 rounded-xl text-sm font-bold border', nuevaCarpetaCategoria==='personal' ? 'bg-amber-600 border-amber-600' : 'bg-slate-900 border-slate-600 hover:border-slate-400']">💡 Personal</button>
+                </div>
+                <div class="flex gap-3">
+                    <button @click="cerrarModalCarpeta" class="flex-1 bg-slate-700 hover:bg-slate-600 py-2 rounded-xl font-bold">Cancelar</button>
+                    <button @click="confirmarNuevaCarpeta" class="flex-1 bg-emerald-600 hover:bg-emerald-500 py-2 rounded-xl font-bold">Crear</button>
+                </div>
+            </div>
+        </div>
+        </template>
+
+        <!-- TOASTS: Advertencias / notificaciones emergentes -->
+        <div class="fixed top-4 right-4 z-[80] flex flex-col gap-2 w-[calc(100%-2rem)] max-w-sm">
+            <transition-group name="toast">
+                <div v-for="t in toasts" :key="t.id" class="rounded-xl px-4 py-3 shadow-lg border flex items-start gap-3 backdrop-blur" :class="toastClase(t.tipo)">
+                    <span class="text-lg leading-none">{{ toastIcono(t.tipo) }}</span>
+                    <p class="text-sm flex-1">{{ t.mensaje }}</p>
+                    <button @click="quitarToast(t.id)" class="text-slate-300 hover:text-white leading-none">✕</button>
+                </div>
+            </transition-group>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted } = Vue;
+        createApp({
+            setup() {
+                const vista = ref('dashboard');
+                const cursos = ref([]);
+                const historial = ref([]);
+                const carpetaAbierta = ref(null);
+                const sesion = ref(null);
+                const toasts = ref([]);
+                const confirmDialog = ref(null);
+                const filtroCategoria = ref('todas');
+                const modalCarpetaAbierto = ref(false);
+                const nuevaCarpetaNombre = ref('');
+                const nuevaCarpetaCategoria = ref('universidad');
+                const cargando = ref(true);
+                const errorConexion = ref('');
+
+                const intervalos = [1, 3, 7, 16, 35, 90];
+
+                // ---------- Toasts ----------
+                let toastSeq = 0;
+                const mostrarToast = (mensaje, tipo = 'info', duracion = 4500) => {
+                    const id = ++toastSeq;
+                    toasts.value.push({ id, mensaje, tipo });
+                    setTimeout(() => quitarToast(id), duracion);
+                };
+                const quitarToast = (id) => { toasts.value = toasts.value.filter(t => t.id !== id); };
+                const toastClase = (tipo) => ({
+                    error: 'bg-rose-900/95 border-rose-600 text-rose-50',
+                    warning: 'bg-amber-900/95 border-amber-600 text-amber-50',
+                    success: 'bg-emerald-900/95 border-emerald-600 text-emerald-50',
+                    info: 'bg-slate-800/95 border-slate-600 text-slate-100'
+                }[tipo] || 'bg-slate-800/95 border-slate-600 text-slate-100');
+                const toastIcono = (tipo) => ({ error: '⛔', warning: '⚠️', success: '✅', info: 'ℹ️' }[tipo] || 'ℹ️');
+
+                const pedirConfirmacion = (mensaje, onConfirm) => { confirmDialog.value = { mensaje, onConfirm }; };
+                const confirmarAccion = () => { if (confirmDialog.value) confirmDialog.value.onConfirm(); confirmDialog.value = null; };
+                const cancelarConfirmacion = () => { confirmDialog.value = null; };
+
+                // ---------- Fechas ----------
+                const hoyStr = () => new Date().toISOString().split('T')[0];
+                const diasRestantes = (fechaStr) => {
+                    if (!fechaStr) return 0;
+                    const hoy = new Date(hoyStr() + 'T00:00:00');
+                    const fecha = new Date(fechaStr + 'T00:00:00');
+                    return Math.round((fecha - hoy) / 86400000);
+                };
+                const etiquetaFecha = (fechaStr) => {
+                    const d = diasRestantes(fechaStr);
+                    if (d < 0) return `Atrasado ${-d}d`;
+                    if (d === 0) return 'Hoy';
+                    if (d === 1) return 'Mañana';
+                    return `En ${d} días`;
+                };
+                const badgeClass = (d) => d < 0 ? 'text-rose-400' : d === 0 ? 'text-amber-400' : 'text-emerald-400';
+
+                // ---------- Carga de datos desde Notion ----------
+                const cargarDatos = async () => {
+                    cargando.value = true;
+                    errorConexion.value = '';
+                    try {
+                        const [carpetasRes, temasRes, historialRes] = await Promise.all([
+                            fetch('/api/carpetas').then(r => r.json()),
+                            fetch('/api/temas').then(r => r.json()),
+                            fetch('/api/historial').then(r => r.json())
+                        ]);
+                        if (carpetasRes.error) throw new Error(carpetasRes.error);
+                        cursos.value = carpetasRes.map(c => ({
+                            ...c,
+                            temas: temasRes.filter(t => t.carpetaId === c.id)
+                        }));
+                        historial.value = historialRes;
+
+                        const hoy = hoyStr();
+                        let pendientes = 0;
+                        cursos.value.forEach(c => c.temas.forEach(t => { if (t.proximoRepaso <= hoy) pendientes++; }));
+                        if (pendientes > 0) {
+                            mostrarToast(`Tienes ${pendientes} tema${pendientes === 1 ? '' : 's'} pendiente${pendientes === 1 ? '' : 's'} de repaso.`, 'warning', 7000);
+                        }
+                    } catch (err) {
+                        errorConexion.value = err.message || 'Error de conexión con Notion.';
+                    } finally {
+                        cargando.value = false;
+                    }
+                };
+
+                onMounted(cargarDatos);
+
+                // ---------- Carpetas ----------
+                const abrirModalCarpeta = () => {
+                    nuevaCarpetaNombre.value = '';
+                    nuevaCarpetaCategoria.value = 'universidad';
+                    modalCarpetaAbierto.value = true;
+                };
+                const cerrarModalCarpeta = () => { modalCarpetaAbierto.value = false; };
+
+                const confirmarNuevaCarpeta = async () => {
+                    const limpio = nuevaCarpetaNombre.value.trim();
+                    if (!limpio) { mostrarToast('El nombre de la carpeta no puede estar vacío.', 'warning'); return; }
+                    if (cursos.value.some(c => c.nombre.toLowerCase() === limpio.toLowerCase())) {
+                        mostrarToast(`Ya existe una carpeta llamada "${limpio}".`, 'warning'); return;
+                    }
+                    try {
+                        await fetch('/api/carpetas', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ nombre: limpio, categoria: nuevaCarpetaCategoria.value })
+                        });
+                        mostrarToast(`Carpeta "${limpio}" creada en Notion.`, 'success');
+                        modalCarpetaAbierto.value = false;
+                        await cargarDatos();
+                    } catch (err) {
+                        mostrarToast('No se pudo crear la carpeta en Notion.', 'error');
+                    }
+                };
+
+                const eliminarCarpeta = (index) => {
+                    const carpeta = cursos.value[index];
+                    pedirConfirmacion(`¿Eliminar la carpeta "${carpeta.nombre}" y todo su contenido en Notion? Esta acción no se puede deshacer.`, async () => {
+                        try {
+                            await fetch(`/api/carpetas/${carpeta.id}`, { method: 'DELETE' });
+                            mostrarToast(`Carpeta "${carpeta.nombre}" eliminada.`, 'info');
+                            await cargarDatos();
+                        } catch (err) {
+                            mostrarToast('No se pudo eliminar la carpeta en Notion.', 'error');
+                        }
+                    });
+                };
+
+                const eliminarTemaPorId = (cIdx, id) => {
+                    const tema = cursos.value[cIdx].temas.find(t => t.id === id);
+                    pedirConfirmacion(`¿Eliminar el tema "${tema.nombre}"? Perderás su historial de repaso.`, async () => {
+                        try {
+                            await fetch(`/api/temas/${id}`, { method: 'DELETE' });
+                            mostrarToast(`Tema "${tema.nombre}" eliminado.`, 'info');
+                            await cargarDatos();
+                        } catch (err) {
+                            mostrarToast('No se pudo eliminar el tema en Notion.', 'error');
+                        }
+                    });
+                };
+
+                const subirJSON = (e, curso) => {
+                    const archivo = e.target.files[0];
+                    if (!archivo) return;
+                    const lector = new FileReader();
+                    lector.onload = async (ev) => {
+                        try {
+                            const d = JSON.parse(ev.target.result);
+                            if (!d.tema || !Array.isArray(d.flashcards) || !Array.isArray(d.cuestionario)) {
+                                mostrarToast('El JSON no tiene el formato esperado (faltan "tema", "flashcards" o "cuestionario").', 'error');
+                                return;
+                            }
+                            if (d.flashcards.length < 5 || d.cuestionario.length < 3) {
+                                mostrarToast('Advertencia: se recomienda al menos 5 flashcards y 3 preguntas para un buen repaso.', 'warning');
+                            }
+                            await fetch('/api/temas', {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    nombre: d.tema, carpetaId: curso.id,
+                                    flashcards: d.flashcards, cuestionario: d.cuestionario,
+                                    proximoRepaso: hoyStr()
+                                })
+                            });
+                            mostrarToast(`Tema "${d.tema}" agregado a "${curso.nombre}" en Notion.`, 'success');
+                            await cargarDatos();
+                        } catch (err) {
+                            mostrarToast('No se pudo leer o subir el archivo JSON.', 'error');
+                        }
+                    };
+                    lector.readAsText(archivo);
+                    e.target.value = '';
+                };
+
+                const proximoDeCurso = (curso) => {
+                    if (!curso.temas.length) return null;
+                    return [...curso.temas].sort((a, b) => a.proximoRepaso.localeCompare(b.proximoRepaso))[0];
+                };
+
+                const abrirCarpeta = (idx) => { carpetaAbierta.value = idx; };
+                const cerrarCarpeta = () => { carpetaAbierta.value = null; };
+
+                const temasOrdenados = computed(() => {
+                    if (carpetaAbierta.value === null) return [];
+                    return [...cursos.value[carpetaAbierta.value].temas].sort((a, b) => a.proximoRepaso.localeCompare(b.proximoRepaso));
+                });
+
+                const contarCategoria = (categoria) => cursos.value.filter(c => c.categoria === categoria).length;
+                const cursosFiltrados = computed(() =>
+                    cursos.value.map((curso, idx) => ({ curso, idx }))
+                        .filter(({ curso }) => filtroCategoria.value === 'todas' || curso.categoria === filtroCategoria.value)
+                );
+
+                const alternarCategoria = async (idx) => {
+                    const curso = cursos.value[idx];
+                    const nuevaCategoria = curso.categoria === 'personal' ? 'universidad' : 'personal';
+                    try {
+                        await fetch(`/api/carpetas/${curso.id}`, {
+                            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ categoria: nuevaCategoria })
+                        });
+                    } catch (e) { /* si el backend no soporta PATCH aquí, igual refrescamos abajo */ }
+                    curso.categoria = nuevaCategoria;
+                    mostrarToast(`"${curso.nombre}" movida a ${nuevaCategoria === 'personal' ? '💡 Personal' : '🎓 Universidad'}.`, 'info');
+                };
+
+                // ---------- Agenda ----------
+                const agendaOrdenada = computed(() => {
+                    let ag = {};
+                    cursos.value.forEach(c => c.temas.forEach(t => {
+                        if (!ag[t.proximoRepaso]) ag[t.proximoRepaso] = [];
+                        ag[t.proximoRepaso].push({ ...t, curso: c.nombre });
+                    }));
+                    return Object.entries(ag).sort((a, b) => a[0].localeCompare(b[0]));
+                });
+
+                // ---------- Sesión de repaso ----------
+                const empezarRepaso = (tema, cursoNombre) => {
+                    const tieneFlashcards = tema.flashcards && tema.flashcards.length > 0;
+                    const tieneQuiz = tema.cuestionario && tema.cuestionario.length > 0;
+                    sesion.value = {
+                        tema: { ...tema }, curso: cursoNombre,
+                        fase: tieneFlashcards ? 'flashcards' : (tieneQuiz ? 'cuestionario' : 'resultado'),
+                        flashcardIndex: 0, flipped: false,
+                        quizIndex: 0, score: 0,
+                        respondida: false, ultimaCorrecta: false, respuestaSeleccionada: null
+                    };
+                    carpetaAbierta.value = null;
+                    if (sesion.value.fase === 'resultado') finalizarSesion();
+                };
+
+                const siguienteFlashcard = () => {
+                    const s = sesion.value;
+                    if (s.flashcardIndex + 1 < s.tema.flashcards.length) {
+                        s.flashcardIndex++; s.flipped = false;
+                    } else if (s.tema.cuestionario && s.tema.cuestionario.length > 0) {
+                        s.fase = 'cuestionario';
+                    } else {
+                        finalizarSesion();
+                    }
+                };
+
+                const preguntaActual = computed(() => {
+                    if (!sesion.value || sesion.value.fase !== 'cuestionario') return null;
+                    return sesion.value.tema.cuestionario[sesion.value.quizIndex];
+                });
+
+                const responder = (letra) => {
+                    const s = sesion.value;
+                    if (s.respondida) return;
+                    s.respondida = true;
+                    s.respuestaSeleccionada = letra;
+                    s.ultimaCorrecta = (letra === preguntaActual.value.respuesta_correcta);
+                    if (s.ultimaCorrecta) s.score++;
+                };
+
+                const claseOpcion = (letra) => {
+                    const s = sesion.value;
+                    if (!s.respondida) return 'border-slate-600 hover:border-blue-500';
+                    const correcta = preguntaActual.value.respuesta_correcta;
+                    if (letra === correcta) return 'bg-emerald-900/40 border-emerald-500';
+                    if (letra === s.respuestaSeleccionada) return 'bg-rose-900/40 border-rose-500';
+                    return 'border-slate-700 opacity-60';
+                };
+
+                const siguientePregunta = () => {
+                    const s = sesion.value;
+                    if (s.quizIndex + 1 < s.tema.cuestionario.length) {
+                        s.quizIndex++; s.respondida = false; s.respuestaSeleccionada = null;
+                    } else {
+                        finalizarSesion();
+                    }
+                };
+
+                const porcentaje = computed(() => {
+                    const s = sesion.value;
+                    if (!s || !s.tema.cuestionario || !s.tema.cuestionario.length) return 100;
+                    return (s.score / s.tema.cuestionario.length) * 100;
+                });
+
+                const resultadoEmoji = computed(() => {
+                    const p = porcentaje.value;
+                    if (p >= 90) return '🏆'; if (p >= 70) return '🎉'; if (p >= 40) return '💪'; return '🔁';
+                });
+
+                const finalizarSesion = async () => {
+                    const s = sesion.value;
+                    const tema = s.tema;
+                    const pct = porcentaje.value;
+                    let box = tema.box || 0;
+                    if (pct < 40) box = 0;
+                    else if (pct < 70) box = Math.max(0, box - 1);
+                    else if (pct < 90) box = box + 1;
+                    else box = box + 2;
+                    box = Math.min(box, intervalos.length - 1);
+
+                    const dias = intervalos[box];
+                    const nueva = new Date(hoyStr() + 'T00:00:00');
+                    nueva.setDate(nueva.getDate() + dias);
+                    const proximaFecha = nueva.toISOString().split('T')[0];
+                    const repeticiones = (tema.repeticiones || 0) + 1;
+
+                    try {
+                        await fetch(`/api/temas/${tema.id}`, {
+                            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ proximoRepaso: proximaFecha, box, repeticiones })
+                        });
+                        await fetch('/api/historial', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ tema: tema.nombre, curso: s.curso, fecha: hoyStr(), score: s.score, total: tema.cuestionario ? tema.cuestionario.length : 0 })
+                        });
+                        tema.box = box; tema.proximoRepaso = proximaFecha; tema.repeticiones = repeticiones;
+                        s.fase = 'resultado';
+                        cargarDatos();
+                    } catch (err) {
+                        mostrarToast('No se pudo guardar el resultado en Notion.', 'error');
+                        s.fase = 'resultado';
+                    }
+                };
+
+                const cancelarSesion = () => { sesion.value = null; };
+                const cerrarSesion = () => { sesion.value = null; };
+
+                // ---------- Exportar / Importar ----------
+                const exportarRespaldo = () => {
+                    if (!cursos.value.length && !historial.value.length) {
+                        mostrarToast('Todavía no hay datos para exportar.', 'warning'); return;
+                    }
+                    const respaldo = { app: 'RecallPro', version: 2, fechaExportacion: hoyStr(), cursos: cursos.value, historial: historial.value };
+                    const blob = new Blob([JSON.stringify(respaldo, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = `recallpro_backup_${hoyStr()}.json`;
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    mostrarToast('Copia de seguridad descargada.', 'success');
+                };
+
+                const importarRespaldo = (e) => {
+                    const archivo = e.target.files[0];
+                    if (!archivo) return;
+                    const lector = new FileReader();
+                    lector.onload = (ev) => {
+                        let d;
+                        try { d = JSON.parse(ev.target.result); }
+                        catch (err) { mostrarToast('No se pudo leer el archivo.', 'error'); return; }
+                        if (!Array.isArray(d.cursos)) { mostrarToast('Este archivo no es una copia de seguridad válida.', 'error'); return; }
+
+                        pedirConfirmacion(`Esto creará ${d.cursos.length} carpeta(s) nuevas en tu Notion (no reemplaza lo existente). ¿Continuar?`, async () => {
+                            mostrarToast('Importando a Notion, esto puede tardar unos segundos…', 'info', 6000);
+                            try {
+                                for (const curso of d.cursos) {
+                                    const nueva = await fetch('/api/carpetas', {
+                                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ nombre: curso.nombre, categoria: curso.categoria || 'universidad' })
+                                    }).then(r => r.json());
+                                    for (const tema of (curso.temas || [])) {
+                                        await fetch('/api/temas', {
+                                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                                nombre: tema.nombre, carpetaId: nueva.id,
+                                                flashcards: tema.flashcards, cuestionario: tema.cuestionario,
+                                                proximoRepaso: tema.proximoRepaso || hoyStr()
+                                            })
+                                        });
+                                    }
+                                }
+                                mostrarToast('Importación a Notion completada.', 'success');
+                                await cargarDatos();
+                            } catch (err) {
+                                mostrarToast('Ocurrió un error durante la importación.', 'error');
+                            }
+                        });
+                    };
+                    lector.readAsText(archivo);
+                    e.target.value = '';
+                };
+
+                return {
+                    vista, cursos, historial, carpetaAbierta, sesion, cargando, errorConexion,
+                    cargarDatos, eliminarCarpeta, eliminarTemaPorId, subirJSON,
+                    proximoDeCurso, abrirCarpeta, cerrarCarpeta, temasOrdenados,
+                    agendaOrdenada, diasRestantes, etiquetaFecha, badgeClass,
+                    empezarRepaso, siguienteFlashcard, preguntaActual, responder, claseOpcion,
+                    siguientePregunta, porcentaje, resultadoEmoji, cancelarSesion, cerrarSesion,
+                    toasts, quitarToast, toastClase, toastIcono,
+                    confirmDialog, confirmarAccion, cancelarConfirmacion,
+                    exportarRespaldo, importarRespaldo,
+                    filtroCategoria, cursosFiltrados, contarCategoria, alternarCategoria,
+                    modalCarpetaAbierto, nuevaCarpetaNombre, nuevaCarpetaCategoria,
+                    abrirModalCarpeta, cerrarModalCarpeta, confirmarNuevaCarpeta
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
